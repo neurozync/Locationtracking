@@ -1,0 +1,257 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Field Location Tool</title>
+<link rel="dns-prefetch" href="https://nominatim.openstreetmap.org" />
+<link rel="dns-prefetch" href="https://api.open-meteo.com" />
+<style>
+  :root {
+    --bg: #0e1013;
+    --card: #1c1f26;
+    --border: #1f1f1f;
+    --text: #d4d4d4;
+    --accent: #1f80c1;
+    --btn-bg: #2b2f39;
+    --danger: #ff6961;
+  }
+  [data-theme="light"] {
+    --bg: #f7fafe;
+    --card: #ffffff;
+    --border: #cdd4df;
+    --text: #222;
+    --accent: #1f80c1;
+    --btn-bg: #e5eaf1;
+    --danger: #b00020;
+  }
+  * { box-sizing: border-box; font-family: Arial, sans-serif; }
+  body {
+    margin: 0;
+    background: var(--bg);
+    color: var(--text);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: start;
+    min-height: 100vh;
+    padding: 16px;
+  }
+  .container {
+    background: var(--card);
+    border: 1px solid var(--border);
+    border-radius: 16px;
+    padding: 24px;
+    width: 100%;
+    max-width: 620px;
+    box-shadow: 0 0 12px #14171c80;
+    position: relative;
+  }
+  .top-row {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 16px;
+  }
+  #gpsStatus {
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background-color: red;
+    position: absolute;
+    top: 16px;
+    right: 16px;
+  }
+  select, .toggle, .dropdown {
+    background: var(--btn-bg);
+    color: var(--text);
+    border: 1px solid var(--border);
+    padding: 8px 10px;
+    border-radius: 8px;
+    font-size: 14px;
+    cursor: pointer;
+  }
+  #getLocationBtn {
+    background: var(--accent);
+    color: #fff;
+    border: none;
+    border-radius: 50%;
+    width: 160px;
+    height: 160px;
+    font-size: 18px;
+    font-weight: bold;
+    cursor: pointer;
+    margin: 0 auto 20px;
+    display: block;
+    transition: transform 0.2s;
+  }
+  #getLocationBtn:hover {
+    transform: scale(1.06);
+  }
+  .info-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(250px, 1fr));
+    gap: 10px;
+    margin-bottom: 20px;
+  }
+  .info-card {
+    background: var(--btn-bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 10px;
+    font-size: 14px;
+    min-height: 44px;
+  }
+  .label {
+    font-weight: bold;
+    display: block;
+    margin-bottom: 4px;
+  }
+  .dropdown-wrapper {
+    text-align: center;
+    margin-top: 10px;
+  }
+  .fallback {
+    color: var(--danger);
+    text-align: center;
+    margin-top: 12px;
+    min-height: 20px;
+  }
+</style>
+</head>
+<body>
+<div class="container">
+  <div id="gpsStatus"></div>
+  <div class="top-row">
+    <select id="langSelect" aria-label="Select Language">
+      <option value="en">English</option>
+      <option value="es">Español</option>
+      <option value="fr">Français</option>
+    </select>
+    <button class="toggle" id="themeToggle">Dark ▾</button>
+  </div>
+
+  <button id="getLocationBtn">Get My Location</button>
+
+  <div class="info-grid" id="infoGrid"></div>
+
+  <div class="dropdown-wrapper">
+    <select id="actionDropdown" class="dropdown">
+      <option disabled selected>Choose Action</option>
+      <option value="copyAddress">Copy Address</option>
+      <option value="copyCoords">Copy Coordinates</option>
+      <option value="sos">SOS Message</option>
+      <option value="maps">Open in Maps</option>
+    </select>
+  </div>
+
+  <div class="fallback" id="fallback"></div>
+</div>
+
+<script>
+const qs = id => document.getElementById(id);
+const gpsStatus = qs('gpsStatus');
+let currentData = {}, watchId = null, bestAcc = Infinity, readings = 0;
+
+qs('getLocationBtn').addEventListener('click', () => {
+  if (watchId) navigator.geolocation.clearWatch(watchId);
+  bestAcc = Infinity;
+  readings = 0;
+  clearInfo();
+  updateGPSStatus('yellow');
+  showFallback('Searching for precise location…');
+  if (!('geolocation' in navigator)) return showFallback('Geolocation unsupported.');
+  watchId = navigator.geolocation.watchPosition(onPos, onErr, {
+    enableHighAccuracy: true,
+    maximumAge: 0,
+    timeout: 20000
+  });
+});
+
+function onPos(pos) {
+  readings++;
+  const { latitude, longitude, accuracy } = pos.coords;
+  if (accuracy < bestAcc) {
+    bestAcc = accuracy;
+    updateData(pos);
+  }
+  if (bestAcc <= 10 || readings >= 10) {
+    navigator.geolocation.clearWatch(watchId);
+    showFallback('');
+    updateGPSStatus('green');
+  }
+}
+
+function onErr(err) {
+  navigator.geolocation.clearWatch(watchId);
+  updateGPSStatus('red');
+  showFallback(err.code === 1 ? 'Permission denied.' : 'Location unavailable.');
+}
+
+function updateGPSStatus(status) {
+  gpsStatus.style.backgroundColor = status === 'green' ? 'limegreen' : status === 'yellow' ? 'gold' : 'red';
+}
+
+function updateData(pos) {
+  clearInfo();
+  const { latitude, longitude, accuracy } = pos.coords;
+  const lat = latitude.toFixed(6), lon = longitude.toFixed(6);
+  currentData = { latitude: lat, longitude: lon, accuracy: accuracy.toFixed(1) };
+  addCard('Coordinates', `${lat}, ${lon}`);
+  addCard('Accuracy', `${accuracy.toFixed(1)} m`);
+  reverseGeocode(lat, lon).then(addr => {
+    currentData.address = addr;
+    addCard('Address', addr);
+  });
+  fetch(`https://api.open-meteo.com/v1/forecast?latitude=${lat}&longitude=${lon}&current_weather=true&temperature_unit=fahrenheit`)
+    .then(r => r.json())
+    .then(j => {
+      const w = j.current_weather;
+      const wStr = `${w.temperature}°F, ${w.windspeed} km/h`;
+      currentData.weather = wStr;
+      addCard('Weather', wStr);
+    });
+}
+
+function reverseGeocode(lat, lon) {
+  return fetch(`https://nominatim.openstreetmap.org/reverse?format=jsonv2&lat=${lat}&lon=${lon}&addressdetails=1`)
+    .then(r => r.json())
+    .then(j => j.display_name || 'N/A')
+    .catch(() => 'N/A');
+}
+
+function clearInfo() {
+  qs('infoGrid').innerHTML = '';
+}
+function addCard(label, value) {
+  const div = document.createElement('div');
+  div.className = 'info-card';
+  div.innerHTML = `<span class='label'>${label}</span>${value}`;
+  qs('infoGrid').appendChild(div);
+}
+function showFallback(msg) {
+  qs('fallback').innerText = msg;
+}
+
+qs('actionDropdown').addEventListener('change', e => {
+  const val = e.target.value;
+  if (val === 'copyAddress') navigator.clipboard.writeText(currentData.address || '');
+  else if (val === 'copyCoords') navigator.clipboard.writeText(`${currentData.latitude}, ${currentData.longitude}`);
+  else if (val === 'sos') {
+    const msg = `SOS: Need assistance at ${currentData.address || 'N/A'} (${currentData.latitude},${currentData.longitude})`;
+    if (navigator.share) navigator.share({ text: msg });
+    else navigator.clipboard.writeText(msg);
+  } else if (val === 'maps') {
+    window.open(`https://maps.google.com/?q=${currentData.latitude},${currentData.longitude}`, '_blank');
+  }
+  e.target.selectedIndex = 0;
+});
+
+qs('themeToggle').addEventListener('click', () => {
+  const light = document.documentElement.dataset.theme === 'light';
+  document.documentElement.dataset.theme = light ? '' : 'light';
+  qs('themeToggle').innerText = light ? 'Dark ▾' : 'Light ▾';
+});
+</script>
+</body>
+</html>
